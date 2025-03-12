@@ -1,0 +1,74 @@
+name: Infra Provisioning through Terraform
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to deploy (eg..., dev, staging, prod)"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+        - dev
+        - staging
+        - prod
+
+  push:
+     branches:
+       - main
+
+  pull_request:
+     branches:
+      - main
+ 
+      
+permissions:
+  contents: read
+  pull-requests: write   
+  id-token: write  
+
+
+jobs:
+  terraform:
+    name: Terraform
+    runs-on: ubuntu-latest
+    env:
+      TF_WORKING_DIR: infra/environment/${{ github.event.inputs.environment || 'dev' }}  
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: latest
+        
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+            aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+            aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            aws-region: ap-south-1    
+
+      - name: Install TFLint
+        run: curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+
+      - name: Run TFLint
+        run: |
+          tflint --init
+          tflint --chdir=${TF_WORKING_DIR}
+          
+      # Step: Terraform Execute
+      - name: Terraform Init
+        run: terraform -chdir=${TF_WORKING_DIR} init
+
+      - name: Terraform Validate
+        run: terraform -chdir=${TF_WORKING_DIR} validate
+
+      - name: Terraform Plan
+        run: terraform -chdir=${TF_WORKING_DIR} plan -out=tfplan
+
+      - name: Terraform Apply
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: terraform -chdir=${TF_WORKING_DIR} apply -auto-approve tfplan
